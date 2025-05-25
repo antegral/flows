@@ -1,44 +1,35 @@
-services:
-  grafana:
-    image: grafana/grafana:latest
-    container_name: grafana
-    restart: unless-stopped
-    ports:
-      - "3000:3000"
-    volumes:
-      - grafana_data:/var/lib/grafana
-    environment:
-      - GF_SECURITY_ADMIN_USER=${GRAFANA_USERNAME}
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
-    networks:
-      - monitoring_net
+version: "3.8"
 
-  sflow-collector:
+services:
+  sflow_collector:
     image: pmacct/sfacctd:latest
-    container_name: sflow-collector
-    depends_on:
-      - kafka
     restart: always
-    ports:
-      - "6343:6343/udp"
+    network_mode: host
     volumes:
       - ./sfacctd.conf:/etc/pmacct/sfacctd.conf:ro
       - ./networks.lst:/etc/pmacct/networks.lst:ro
       - ./peering_agent.map:/etc/pmacct/peering_agent.map:ro
       - ./pretag.map:/etc/pmacct/pretag.map:ro
-    networks:
-      - monitoring_net
+
+  netflow_collector:
+    image: pmacct/nfacctd:latest
+    restart: always
+    network_mode: host
+    volumes:
+      - ./nfacctd.conf:/etc/pmacct/nfacctd.conf:ro
+      - ./networks.lst:/etc/pmacct/networks.lst:ro
+      - ./peering_agent.map:/etc/pmacct/peering_agent.map:ro
+      - ./pretag.map:/etc/pmacct/pretag.map:ro
 
   flow-consumer:
     image: serverforge/flow-consumer:v0.0.8-beta
-    container_name: flow-consumer
     depends_on:
-      - kafka
-      - zookeeper
-    network_mode: "service:clickhouse"
+    - kafka
+    - clickhouse
+    network_mode: host
     restart: always
     environment:
-      - brokers=kafka:19092
+      - brokers=localhost:9092
       - topic=pmacct.acct
       - database=dankflows
       - policy=365 DAYS
@@ -47,54 +38,30 @@ services:
     image: zookeeper
     container_name: zookeeper
     restart: always
+    network_mode: host
     environment:
       - ALLOW_ANONYMOUS_LOGIN=yes
-    ulimits:
-      nofile:
-        soft: 65536
-        hard: 65536
-    healthcheck:
-      test: ["CMD-SHELL", "echo ruok | nc -w 2 zookeeper 2181"]
-      interval: 5s
-      timeout: 10s
-      retries: 3
-    networks:
-      - monitoring_net
 
   kafka:
-    image: wurstmeister/kafka
+    image: ubuntu/kafka
     container_name: kafka
-    hostname: kafka
     restart: always
     depends_on:
-      zookeeper:
-        condition: service_healthy
+      - zookeeper
+    network_mode: host
     environment:
-      - KAFKA_ADVERTISED_LISTENERS=INSIDE://:19092,OUTSIDE://172.17.0.1:9092
-      - KAFKA_LISTENERS=INSIDE://kafka:19092,OUTSIDE://:9092
-      - KAFKA_LISTENER_SECURITY_PROTOCOL_MAP=INSIDE:PLAINTEXT,OUTSIDE:PLAINTEXT
-      - KAFKA_INTER_BROKER_LISTENER_NAME=INSIDE
-      - KAFKA_CREATE_TOPICS=pmacct.acct:3:1
-      - KAFKA_ZOOKEEPER_CONNECT=zookeeper:2181
+      - KAFKA_CREATE_TOPICS="pmacct.acct:3:1"
+      - KAFKA_ZOOKEEPER_CONNECT=127.0.0.1:2181
       - KAFKA_LOG_RETENTION_HOURS=1
-    networks:
-      - monitoring_net
+      - ALLOW_PLAINTEXT_LISTENER=yes
 
   clickhouse:
     image: clickhouse/clickhouse-server
     container_name: clickhouse
     restart: always
+    network_mode: host
     volumes:
       - ./clickhouse-data:/var/lib/clickhouse/
       - ./no_logging.xml:/etc/clickhouse-server/users.d/no_logging.xml
       - ./disable_all_the_logs.xml:/etc/clickhouse-server/config.d/disable_all_the_logs.xml
       - ./no_verbose.xml:/etc/clickhouse-server/config.d/no_verbose.xml
-    networks:
-      - monitoring_net
-
-volumes:
-  grafana_data:
-
-networks:
-  monitoring_net:
-    driver: bridge
