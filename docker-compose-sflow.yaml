@@ -20,6 +20,7 @@ services:
       - kafka
     restart: always
     ports:
+      - "179:179"
       - "6343:6343/udp"
     volumes:
       - ./sfacctd.conf:/etc/pmacct/sfacctd.conf:ro
